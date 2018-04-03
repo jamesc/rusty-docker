@@ -6,3 +6,4 @@ authors = ["James Casey <james@chef.io>"]
 [dependencies]
 clap = "2.31"
 nix = "0.8.1"
+uuid = { version = "0.6.2", features = ["v4"]}

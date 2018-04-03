@@ -3,13 +3,21 @@
 extern crate clap;
 extern crate nix;
 extern crate libc;
+extern crate uuid;
 
 use clap::{App, Arg, SubCommand};
 use libc::_exit;
 use nix::sys::wait::{waitpid,WaitStatus};
+<<<<<<< d69ee479b022a8f42dcf8f99bd948bd93ef573c8
 use nix::unistd::{fork,ForkResult,execve};
 use std::error::Error;
 use std::ffi::CString;
+=======
+use nix::unistd::{fork,ForkResult};
+use uuid::{Uuid,UuidVersion};
+
+mod isolate;
+>>>>>>> Add skeleton of chroot isolation CLI
 
 fn main() {
 
@@ -19,6 +27,21 @@ fn main() {
         .author("Me")
         .subcommand(SubCommand::with_name("run")
             .about("starts a container")
+            .arg(Arg::with_name("image-dir")
+                 .help("Images directory")
+                 .takes_value(true)
+                 .long("image-dir")
+                 .default_value("/workspace/images"))
+            .arg(Arg::with_name("image-name")
+                 .help("Image name")
+                 .takes_value(true)
+                 .long("image-name")
+                 .default_value("ubuntu"))
+            .arg(Arg::with_name("container-dir")
+                 .help("Containers directory")
+                 .takes_value(true)
+                 .long("container-dir")
+                 .default_value("/workspace/containers"))
             .arg(Arg::with_name("command")
                 .help("COMMAND")
                 .takes_value(true)
@@ -28,32 +51,33 @@ fn main() {
 
     match matches.subcommand() {
         ("run", Some(run_matches)) => {
+            let container_name = Uuid::new(UuidVersion::Random).unwrap();
             let values = run_matches.values_of("command").unwrap();
             let args = values.collect::<Vec<_>>();
             let command = args[0].clone();
-            run(command, args);
-        },
+            run(command, args,
+                run_matches.value_of("image-dir").unwrap(),
+                run_matches.value_of("image-name").unwrap(),
+                run_matches.value_of("container-dir").unwrap(),
+                &container_name.simple().to_string());
+            },
         ("", None)   => println!("No subcommand was used"), // If no subcommand was used it'll match the tuple ("", None)
         _            => unreachable!(), // If all subcommands are defined above, anything else is unreachable!()
     }
 }
 
-fn contain(command: &CString, args: &[CString]) {
-    println!("DEBUG: execve: {:?} {:?}", command, args);
-    let _process = match execve(command, args, &[]) {
-        Err(why) => panic!("couldn't spawn process: {}", why.description()),
-        Ok(process) => process,
-    };
-}
-
-fn run(command: &str, args: Vec<&str>) {
+fn run(command: &str, args: Vec<&str>,
+        image_dir: &str, image_name: &str,
+        container_dir: &str, container_name: &str) {
     println!("DEBUG: args {:?}", args);
     // Allocate here so we only do async-safe work after the fork
     let c_command = CString::new(command).unwrap();
     let c_args = args.iter().map(|a| CString::new(*a).unwrap()).collect::<Vec<_>>();
     match fork().expect("fork failed") {
         ForkResult::Child => {
-            contain(&c_command, c_args.as_slice());
+            isolate::contain(command, args.as_slice(),
+                             image_dir, image_name,
+                             container_dir, container_name);
         }
         ForkResult::Parent{ child } => {
             // This is the parent, pid contains the PID of the forked process
