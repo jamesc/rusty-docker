@@ -80,7 +80,7 @@ fn run(command: &str, args: Vec<&str>,
             // wait for the forked child, fetch the exit status
             match waitpid(child, None) {
                 Ok(WaitStatus::Exited(pid, 0)) if pid == child => {
-                    println!("{} exited with status {}.", pid, 0)
+                    println!("DEBUG: {} exited with status {}.", pid, 0)
                 },
                 _ => unsafe { _exit(1) },
             }
