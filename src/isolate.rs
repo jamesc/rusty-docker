@@ -9,10 +9,10 @@ use std::path::{Path,PathBuf};
 use std::fs::{DirBuilder,File};
 use std::os::unix::fs::symlink;
 
-use nix::unistd::{chdir,chroot,execve};
+use nix::unistd::{chdir,chroot,execvp};
 use std::ffi::CString;
 
-use nix::mount::{mount, MsFlags};
+use nix::mount::mount;
 use nix::mount::*;
 use self::tar::{Archive,EntryType};
 
@@ -68,6 +68,17 @@ const NONE: Option<&'static [u8]> = None;
                                                container_id, container_dir);
     println!("DEBUG: Created a new root fs for our container: {:?}", container_root);
 
+    // TODO: time to say goodbye to the old mount namespace,
+    //       see "man 2 unshare" to get some help
+    //   HINT 1: there is no os.unshare(), time to use the linux module we made
+    //           just for you!
+    //   HINT 2: the linux module includes both functions and constants!
+    //           e.g. linux.CLONE_NEWNS
+
+    // TODO: remember shared subtrees?
+    // (https://www.kernel.org/doc/Documentation/filesystems/sharedsubtree.txt)
+    // Make / a private mount to avoid littering our host mount table.
+
     mount(Some("proc"), &container_root.join("proc"), Some("proc"),
           MS_NOSUID | MS_NODEV | MS_NOEXEC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
     mount(Some("sysfs"), &container_root.join("sys"), Some("sysfs"),
@@ -91,11 +102,14 @@ const NONE: Option<&'static [u8]> = None;
                    container_root.join("dev").join(dev)).unwrap_or_else(|e| panic!("ERROR: Symlink failed: {}", e));;
     }
 
+    // TODO: add more devices (e.g. null, zero, random, urandom) using os.mknod.
+
+
     chroot(&container_root).unwrap_or_else(|e| panic!("Error: Mount failed: {}", e));
 
     chdir("/").unwrap_or_else(|e| panic!("ERROR: Could not chdir /: {}", e));
 
-    let _process = match execve(command, args, &[]) {
+    let _process = match execvp(command, args) {
         Err(why) => panic!("ERROR: Couldn't spawn process: {}", why.description()),
         Ok(process) => process,
     };
