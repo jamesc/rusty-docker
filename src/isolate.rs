@@ -13,7 +13,7 @@ use nix::unistd::{chdir,chroot,execve};
 use std::ffi::CString;
 
 use nix::mount::{mount, MsFlags};
-
+use nix::mount::*;
 use self::tar::{Archive,EntryType};
 
 fn image_path(image_name: &str, image_dir: &str) -> PathBuf {
@@ -68,13 +68,12 @@ const NONE: Option<&'static [u8]> = None;
                                                container_id, container_dir);
     println!("DEBUG: Created a new root fs for our container: {:?}", container_root);
 
-    // TODO: Create mounts with proper attributes
     mount(Some("proc"), &container_root.join("proc"), Some("proc"),
-          MsFlags::empty(), NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
+          MS_NOSUID | MS_NODEV | MS_NOEXEC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
     mount(Some("sysfs"), &container_root.join("sys"), Some("sysfs"),
-          MsFlags::empty(), NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
-    mount(Some("none"), &container_root.join("dev"), Some("tmpfs"),
-          MsFlags::empty(), NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
+          MS_NOSUID | MS_NODEV | MS_NOEXEC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
+    mount(Some("udev"), &container_root.join("dev"), Some("tmpfs"),
+          MS_NOSUID | MS_STRICTATIME, Some("mode=755")).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
 
     // Make some devices
     let devpts_path = container_root.join("dev").join("pts");
@@ -83,7 +82,7 @@ const NONE: Option<&'static [u8]> = None;
             .recursive(true)
             .create(&devpts_path).unwrap();
         mount(Some("devpts"), &devpts_path, Some("devpts"),
-            MsFlags::empty(), NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
+              MS_NOSUID | MS_NOEXEC | MS_NOATIME, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
     }
 
     let devices = ["stdin", "stdout", "stderr"];
