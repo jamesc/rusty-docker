@@ -2,21 +2,19 @@
 //
 extern crate tar;
 extern crate nix;
+extern crate lazy_static;
 
 use std::error::Error;
-
 use std::path::{Path,PathBuf};
 use std::fs::{DirBuilder,File};
-use std::os::unix::fs::symlink;
-
 use nix::unistd::{chdir,chroot,execvp};
 use std::ffi::CString;
-
 use nix::mount::mount;
 use nix::mount::*;
 use nix::sched::{CLONE_NEWNS,unshare};
-
 use self::tar::{Archive,EntryType};
+
+use device::make_devices;
 
 fn image_path(image_name: &str, image_dir: &str) -> PathBuf {
     Path::new(image_dir).join(image_name).with_extension("tar")
@@ -88,23 +86,7 @@ const NONE: Option<&'static [u8]> = None;
     mount(Some("udev"), &container_root.join("dev"), Some("tmpfs"),
           MS_NOSUID | MS_STRICTATIME, Some("mode=755")).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
 
-    // Make some devices
-    let devpts_path = container_root.join("dev").join("pts");
-    if !devpts_path.exists() {
-        DirBuilder::new()
-            .recursive(true)
-            .create(&devpts_path).unwrap();
-        mount(Some("devpts"), &devpts_path, Some("devpts"),
-              MS_NOSUID | MS_NOEXEC | MS_NOATIME, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
-    }
-
-    let devices = ["stdin", "stdout", "stderr"];
-    for (i, dev) in devices.iter().enumerate() {
-        symlink(Path::new("/proc/self/fd").join(i.to_string()),
-                   container_root.join("dev").join(dev)).unwrap_or_else(|e| panic!("ERROR: Symlink failed: {}", e));;
-    }
-
-    // TODO: add more devices (e.g. null, zero, random, urandom) using os.mknod.
+    make_devices(&container_root.join("dev"));
 
 
     chroot(&container_root).unwrap_or_else(|e| panic!("Error: Mount failed: {}", e));

@@ -1,5 +1,8 @@
 #![feature(libc)]
 
+#[macro_use]
+extern crate lazy_static;
+
 extern crate clap;
 extern crate nix;
 extern crate libc;
@@ -13,6 +16,7 @@ use std::ffi::CString;
 use uuid::{Uuid,UuidVersion};
 
 mod isolate;
+mod device;
 
 fn main() {
 
