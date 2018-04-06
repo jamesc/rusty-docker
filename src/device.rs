@@ -8,10 +8,8 @@ use nix::mount::*;
 use std::path::{Path};
 
 use std::fs::{DirBuilder};
-use nix::sys::stat::mknod;
-//use nix::sys::stat::{fchmodat,FchmodatFlags};
-use nix::unistd::{chown};
-use nix::sys::stat::{Mode, S_IFCHR};
+use nix::sys::stat::{mknod,SFlag,Mode};
+use nix::unistd::{chown,Uid,Gid};
 
 pub struct LinuxDevice {
     pub path: String,
@@ -52,6 +50,11 @@ lazy_static! {
             major: 1,
             minor: 8,
         });
+        v.push(LinuxDevice{
+            path: "console".to_string(),
+            major: 136,
+            minor: 1,
+        });
         v
     };
 }
@@ -70,23 +73,22 @@ pub fn make_devices(dev_root: &Path) {
             .recursive(true)
             .create(&devpts_path).unwrap();
         mount(Some("devpts"), &devpts_path, Some("devpts"),
-              MS_NOSUID | MS_NOEXEC | MS_NOATIME, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
+              MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NOATIME, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
     }
 
     let devices = ["stdin", "stdout", "stderr"];
     for (i, dev) in devices.iter().enumerate() {
         symlink(Path::new("/proc/self/fd").join(i.to_string()),
-                dev_root.join(dev)).unwrap_or_else(|e| panic!("ERROR: Symlink failed: {}", e));;
+                dev_root.join(dev)).unwrap();
     }
+    symlink(Path::new("/proc/self/fd"), &dev_root.join("fd")).unwrap();
 
     for dev in DEFAULT_DEVICES.iter() {
-        println!("DEBUG: mknoding {}", &dev.path);
         let path = dev_root.join(&dev.path);
-        mknod(&path.to_str(), S_IFCHR, Mode::from_bits_truncate(0o666),
+        mknod(&path.to_str(), SFlag::S_IFCHR, Mode::from_bits_truncate(0o666),
               makedev(dev.major, dev.minor)).unwrap();
-        //fchmodat(None, &path, Mode::all(), FollowSymlink);
-
-        chown(&path.to_str(), Some(0), Some(0)).unwrap();
+        chown(&path.to_str(), Some(Uid::from_raw(0)),
+              Some(Gid::from_raw(0))).unwrap();
     }
 
     umask(old);

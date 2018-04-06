@@ -9,9 +9,8 @@ use std::path::{Path,PathBuf};
 use std::fs::{DirBuilder,File};
 use nix::unistd::{chdir,chroot,execvp};
 use std::ffi::CString;
-use nix::mount::mount;
-use nix::mount::*;
-use nix::sched::{CLONE_NEWNS,unshare};
+use nix::mount::{mount,MsFlags};
+use nix::sched::{unshare,CloneFlags};
 use self::tar::{Archive,EntryType};
 
 use device::make_devices;
@@ -64,27 +63,22 @@ pub fn contain(command: &CString, args: &[CString],
                image_name: &str, image_dir: &str,
                container_id: &str, container_dir: &str) {
 const NONE: Option<&'static [u8]> = None;
+    unshare(CloneFlags::CLONE_NEWNS).unwrap_or_else(|e| panic!("ERROR: Couldn't unshare mount: {}", e));
 
-
-    // TODO: remember shared subtrees?
-    // (https://www.kernel.org/doc/Documentation/filesystems/sharedsubtree.txt)
-    // Make / a private mount to avoid littering our host mount table.
-
-    unshare(CLONE_NEWNS).unwrap_or_else(|e| panic!("ERROR: Couldn't unshare mount: {}", e));
-
+    // TODO - what am I doing here?
     mount(Some("rootfs"), Path::new("/"), Some("lxfs"),
-          MS_PRIVATE | MS_REC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
+          MsFlags::MS_PRIVATE | MsFlags::MS_REC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
 
     let container_root = create_container_root(image_name, image_dir,
                                                container_id, container_dir);
     println!("DEBUG: Created a new root fs for our container: {:?}", container_root);
 
     mount(Some("proc"), &container_root.join("proc"), Some("proc"),
-          MS_NOSUID | MS_NODEV | MS_NOEXEC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
+          MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
     mount(Some("sysfs"), &container_root.join("sys"), Some("sysfs"),
-          MS_NOSUID | MS_NODEV | MS_NOEXEC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
+          MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
     mount(Some("udev"), &container_root.join("dev"), Some("tmpfs"),
-          MS_NOSUID | MS_STRICTATIME, Some("mode=755")).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
+          MsFlags::MS_NOATIME, Some("mode=755")).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
 
     make_devices(&container_root.join("dev"));
 
