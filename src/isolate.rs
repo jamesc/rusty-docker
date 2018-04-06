@@ -14,6 +14,8 @@ use std::ffi::CString;
 
 use nix::mount::mount;
 use nix::mount::*;
+use nix::sched::{CLONE_NEWNS,unshare};
+
 use self::tar::{Archive,EntryType};
 
 fn image_path(image_name: &str, image_dir: &str) -> PathBuf {
@@ -64,20 +66,20 @@ pub fn contain(command: &CString, args: &[CString],
                image_name: &str, image_dir: &str,
                container_id: &str, container_dir: &str) {
 const NONE: Option<&'static [u8]> = None;
-    let container_root = create_container_root(image_name, image_dir,
-                                               container_id, container_dir);
-    println!("DEBUG: Created a new root fs for our container: {:?}", container_root);
 
-    // TODO: time to say goodbye to the old mount namespace,
-    //       see "man 2 unshare" to get some help
-    //   HINT 1: there is no os.unshare(), time to use the linux module we made
-    //           just for you!
-    //   HINT 2: the linux module includes both functions and constants!
-    //           e.g. linux.CLONE_NEWNS
 
     // TODO: remember shared subtrees?
     // (https://www.kernel.org/doc/Documentation/filesystems/sharedsubtree.txt)
     // Make / a private mount to avoid littering our host mount table.
+
+    unshare(CLONE_NEWNS).unwrap_or_else(|e| panic!("ERROR: Couldn't unshare mount: {}", e));
+
+    mount(Some("rootfs"), Path::new("/"), Some("lxfs"),
+          MS_PRIVATE | MS_REC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
+
+    let container_root = create_container_root(image_name, image_dir,
+                                               container_id, container_dir);
+    println!("DEBUG: Created a new root fs for our container: {:?}", container_root);
 
     mount(Some("proc"), &container_root.join("proc"), Some("proc"),
           MS_NOSUID | MS_NODEV | MS_NOEXEC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
