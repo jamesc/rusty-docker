@@ -6,14 +6,16 @@ extern crate lazy_static;
 
 use std::error::Error;
 use std::path::{Path,PathBuf};
-use std::fs::{DirBuilder,File};
-use nix::unistd::{chdir,chroot,execvp};
+use std::fs::{DirBuilder,File,remove_dir};
+use nix::unistd::{chdir,execvp,pivot_root};
 use std::ffi::CString;
-use nix::mount::{mount,MsFlags};
+use nix::mount::{mount,MsFlags,umount2,MntFlags};
 use nix::sched::{unshare,CloneFlags};
 use self::tar::{Archive,EntryType};
 
 use device::make_devices;
+
+const NONE: Option<&'static [u8]> = None;
 
 fn image_path(image_name: &str, image_dir: &str) -> PathBuf {
     Path::new(image_dir).join(image_name).with_extension("tar")
@@ -43,6 +45,10 @@ fn create_container_root(image_name: &str, image_dir: &str,
             .create(&container_root).unwrap();
     }
 
+    // Create a new mount point at the root for pivot_root
+    mount(Some("tmpfs"), &container_root, Some("tmpfs"),
+          MsFlags::MS_NOATIME, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
+
     let tar = File::open(image_path).unwrap();
     let mut archive = Archive::new(tar);
     for (_i, entry) in archive.entries().unwrap().enumerate() {
@@ -62,10 +68,8 @@ fn create_container_root(image_name: &str, image_dir: &str,
 pub fn contain(command: &CString, args: &[CString],
                image_name: &str, image_dir: &str,
                container_id: &str, container_dir: &str) {
-const NONE: Option<&'static [u8]> = None;
     unshare(CloneFlags::CLONE_NEWNS).unwrap_or_else(|e| panic!("ERROR: Couldn't unshare mount: {}", e));
 
-    // TODO - what am I doing here?
     mount(Some("rootfs"), Path::new("/"), Some("lxfs"),
           MsFlags::MS_PRIVATE | MsFlags::MS_REC, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
 
@@ -82,10 +86,19 @@ const NONE: Option<&'static [u8]> = None;
 
     make_devices(&container_root.join("dev"));
 
-
-    chroot(&container_root).unwrap_or_else(|e| panic!("Error: Mount failed: {}", e));
+    let old_root = &container_root.join("old_root");
+    if !old_root.exists() {
+        DirBuilder::new()
+            .recursive(true)
+            .create(&old_root).unwrap();
+    }
+    pivot_root(&container_root,
+               &container_root.join("old_root")).unwrap_or_else(|e| panic!("Error: pivot_root failed: {}", e));
 
     chdir("/").unwrap_or_else(|e| panic!("ERROR: Could not chdir /: {}", e));
+
+    umount2("/old_root", MntFlags::MNT_DETACH).unwrap();
+    remove_dir("/old_root").unwrap();
 
     let _process = match execvp(command, args) {
         Err(why) => panic!("ERROR: Couldn't spawn process: {}", why.description()),
