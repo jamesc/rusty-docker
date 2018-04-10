@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -x
+
+if ! [ $(id -u) = 0 ]; then
+   echo "This script needs to be run as root!"
+   exit 1
+fi
+if ! [ -d /workspace ] ; then
+    echo "Creating workspace at /workspace"
+    mkdir /workspace
+    chmod 777 /workspace
+fi
+
+COUNT=`grep /workspace /proc/mounts|wc -l`
+if [ $COUNT -eq 0 ]; then
+    echo "Building tmpfs at /workspace"
+    mount -t tmpfs -l /workspace /workspace
+    mkdir -p /workspace/images
+    mkdir -p /workspace/containers
+    cp -R images/*.tar /workspace/images
+fi
