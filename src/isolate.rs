@@ -29,40 +29,59 @@ fn container_path(container_id: &str, container_dir: &str, subdirs: &[&str]) -> 
     path
 }
 
+fn make_dirs(path: &PathBuf) {
+    println!("Creating : {:?}", path);
+    if !path.exists() {
+        DirBuilder::new()
+            .recursive(true)
+            .create(path).unwrap();
+    }
+}
+
 fn create_container_root(image_name: &str, image_dir: &str,
                          container_id: &str, container_dir: &str
                         ) -> PathBuf {
     let image_path = image_path(image_name, image_dir);
-    let container_root = container_path(container_id, container_dir, &["rootfs"]);
+    let image_root = Path::new(&image_dir).join(&image_name).join("rootfs");
 
     if  !image_path.exists() {
         panic!("ERROR: OS Image doesn't exist: {:?}", image_path);
     }
 
-    if !container_root.exists() {
-        DirBuilder::new()
-            .recursive(true)
-            .create(&container_root).unwrap();
-    }
-
-    // Create a new mount point at the root for pivot_root
-    mount(Some("tmpfs"), &container_root, Some("tmpfs"),
-          MsFlags::MS_NOATIME, NONE).unwrap_or_else(|e| panic!("ERROR: Mount failed: {}", e));
-
-    let tar = File::open(image_path).unwrap();
-    let mut archive = Archive::new(tar);
-    for (_i, entry) in archive.entries().unwrap().enumerate() {
-        let mut file = entry.unwrap();
-        // Tar archives might contain devices or other odd things
-        match file.header().entry_type() {
-            EntryType::Block => {},
-            EntryType::Char => {},
-            _ => {
-                file.unpack_in(&container_root).unwrap_or_else(|e| panic!("ERROR: Couldn't untar OS: {}", e));
+    if !&image_root.exists() {
+        make_dirs(&image_root);
+        let tar = File::open(image_path).unwrap();
+        let mut archive = Archive::new(tar);
+        for (_i, entry) in archive.entries().unwrap().enumerate() {
+            let mut file = entry.unwrap();
+            // Tar archives might contain devices or other odd things
+            match file.header().entry_type() {
+                EntryType::Block => {},
+                EntryType::Char => {},
+                _ => {
+                    file.unpack_in(&image_root).unwrap_or_else(|e| panic!("ERROR: Couldn't untar OS: {}", e));
+                }
             }
         }
     }
-    container_root
+
+    // Setup CoW FS
+    let container_rootfs = container_path(container_id, container_dir, &["rootfs"]);
+    make_dirs(&container_rootfs);
+    let container_cow_rw = container_path(container_id, container_dir, &["cow_rw"]);
+    make_dirs(&container_cow_rw);
+    let container_cow_workdir = container_path(container_id, container_dir, &["cow_workdir"]);
+    make_dirs(&container_cow_workdir);
+
+    // Create a new mount point at the root for pivot_root
+    let args = format!("lowerdir={},upperdir={},workdir={}",
+                    image_root.to_str().unwrap(),
+                    container_cow_rw.to_str().unwrap(),
+                    container_cow_workdir.to_str().unwrap());
+    mount(Some("overlay"), &container_rootfs, Some("overlay"),
+          MsFlags::MS_NODEV, Some(args.as_str())).unwrap_or_else(|e| panic!("ERROR: Couldn't mount overlayfs: {}", e));
+
+    container_rootfs
 }
 
 pub fn contain(command: &CString, args: &[CString],

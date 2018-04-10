@@ -10,5 +10,5 @@ Cargo.lock
 **/*.rs.bk
 
 # Images - don't commit
-images/*.tar
+images/[^.]*
 containers/[a-f0-9]*
